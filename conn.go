@@ -23,6 +23,9 @@ import (
 	"github.com/gocql/gocql/internal/streams"
 )
 
+var WriteBytes func(payload []byte)
+var ReadBytes func(payload []byte)
+
 var (
 	defaultApprovedAuthenticators = []string{
 		"org.apache.cassandra.auth.PasswordAuthenticator",
@@ -232,6 +235,25 @@ func (s *Session) dial(ctx context.Context, host *HostInfo, connConfig *ConnConf
 	return conn, err
 }
 
+type debugConn struct {
+	net.Conn
+}
+
+func (d debugConn) Write(b []byte) (n int, err error) {
+	if WriteBytes != nil {
+		WriteBytes(b)
+	}
+	return d.Conn.Write(b)
+}
+
+func (d debugConn) Read(b []byte) (n int, err error) {
+	n, err = d.Conn.Read(b)
+	if n > 0 && ReadBytes != nil {
+		ReadBytes(b[:n])
+	}
+	return
+}
+
 // dialWithoutObserver establishes connection to a Cassandra node.
 //
 // dialWithoutObserver does not notify the connection observer, so you most probably want to call dial() instead.
@@ -247,9 +269,12 @@ func (s *Session) dialWithoutObserver(ctx context.Context, host *HostInfo, cfg *
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
+
+	debug := debugConn{dialedHost.Conn}
+
 	c := &Conn{
-		conn:          dialedHost.Conn,
-		r:             bufio.NewReader(dialedHost.Conn),
+		conn:          debug,
+		r:             bufio.NewReader(debug),
 		cfg:           cfg,
 		calls:         make(map[int]*callReq),
 		version:       uint8(cfg.ProtoVersion),
@@ -262,7 +287,7 @@ func (s *Session) dialWithoutObserver(ctx context.Context, host *HostInfo, cfg *
 		isSchemaV2:    true, // Try using "system.peers_v2" until proven otherwise
 		frameObserver: s.frameObserver,
 		w: &deadlineContextWriter{
-			w:         dialedHost.Conn,
+			w:         debug,
 			timeout:   writeTimeout,
 			semaphore: make(chan struct{}, 1),
 			quit:      make(chan struct{}),
