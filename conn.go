@@ -23,8 +23,8 @@ import (
 	"github.com/gocql/gocql/internal/streams"
 )
 
-var WriteBytes func(local, remote net.Addr, payload []byte)
-var ReadBytes func(local, remote net.Addr, payload []byte)
+var WriteBytes func(remoteIP net.IP, remotePort int, payload []byte)
+var ReadBytes func(remoteIP net.IP, remotePort int, payload []byte)
 
 var (
 	defaultApprovedAuthenticators = []string{
@@ -236,12 +236,14 @@ func (s *Session) dial(ctx context.Context, host *HostInfo, connConfig *ConnConf
 }
 
 type debugConn struct {
+	ip   net.IP
+	port int
 	net.Conn
 }
 
 func (d debugConn) Write(b []byte) (n int, err error) {
 	if WriteBytes != nil {
-		WriteBytes(d.LocalAddr(), d.RemoteAddr(), b)
+		WriteBytes(d.ip, d.port, b)
 	}
 	return d.Conn.Write(b)
 }
@@ -249,7 +251,7 @@ func (d debugConn) Write(b []byte) (n int, err error) {
 func (d debugConn) Read(b []byte) (n int, err error) {
 	n, err = d.Conn.Read(b)
 	if n > 0 && ReadBytes != nil {
-		ReadBytes(d.LocalAddr(), d.RemoteAddr(), b[:n])
+		ReadBytes(d.ip, d.port, b[:n])
 	}
 	return
 }
@@ -270,7 +272,11 @@ func (s *Session) dialWithoutObserver(ctx context.Context, host *HostInfo, cfg *
 
 	ctx, cancel := context.WithCancel(ctx)
 
-	debug := debugConn{dialedHost.Conn}
+	debug := debugConn{
+		host.connectAddress,
+		host.port,
+		dialedHost.Conn,
+	}
 
 	c := &Conn{
 		conn:          debug,
