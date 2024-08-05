@@ -23,8 +23,8 @@ import (
 	"github.com/gocql/gocql/internal/streams"
 )
 
-var WriteBytes func(payload []byte)
-var ReadBytes func(payload []byte)
+var WriteBytes func(local, remote net.Addr, payload []byte)
+var ReadBytes func(local, remote net.Addr, payload []byte)
 
 var (
 	defaultApprovedAuthenticators = []string{
@@ -241,7 +241,7 @@ type debugConn struct {
 
 func (d debugConn) Write(b []byte) (n int, err error) {
 	if WriteBytes != nil {
-		WriteBytes(b)
+		WriteBytes(d.LocalAddr(), d.RemoteAddr(), b)
 	}
 	return d.Conn.Write(b)
 }
@@ -249,7 +249,7 @@ func (d debugConn) Write(b []byte) (n int, err error) {
 func (d debugConn) Read(b []byte) (n int, err error) {
 	n, err = d.Conn.Read(b)
 	if n > 0 && ReadBytes != nil {
-		ReadBytes(b[:n])
+		ReadBytes(d.LocalAddr(), d.RemoteAddr(), b[:n])
 	}
 	return
 }
