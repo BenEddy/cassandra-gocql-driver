@@ -1254,9 +1254,6 @@ func (c *Conn) prepareStatement(ctx context.Context, stmt string, tracer Tracer)
 			done: make(chan struct{}),
 		}
 
-		if AddStatementCache != nil {
-			AddStatementCache(stmt, c.host.HostID(), flight.preparedStatment.id)
-		}
 		lru.Add(stmtCacheKey, flight)
 		return flight
 	})
@@ -1305,6 +1302,10 @@ func (c *Conn) prepareStatement(ctx context.Context, stmt string, tracer Tracer)
 					// therefore we can just copy them directly.
 					request:  x.reqMeta,
 					response: x.respMeta,
+				}
+
+				if AddStatementCache != nil {
+					AddStatementCache(stmt, c.host.HostID(), flight.preparedStatment.id)
 				}
 			case error:
 				flight.err = x
