@@ -25,6 +25,7 @@ import (
 
 var WriteBytes func(remoteIP net.IP, remotePort int, payload []byte)
 var ReadBytes func(remoteIP net.IP, remotePort int, payload []byte)
+var AddStatementCache func(key string, host string, id []byte)
 
 var (
 	defaultApprovedAuthenticators = []string{
@@ -1251,6 +1252,10 @@ func (c *Conn) prepareStatement(ctx context.Context, stmt string, tracer Tracer)
 	flight, ok := c.session.stmtsLRU.execIfMissing(stmtCacheKey, func(lru *lru.Cache) *inflightPrepare {
 		flight := &inflightPrepare{
 			done: make(chan struct{}),
+		}
+
+		if AddStatementCache != nil {
+			AddStatementCache(stmt, c.host.HostID(), flight.preparedStatment.id)
 		}
 		lru.Add(stmtCacheKey, flight)
 		return flight
