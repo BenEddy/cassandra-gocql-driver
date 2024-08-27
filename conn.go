@@ -23,8 +23,20 @@ import (
 	"github.com/gocql/gocql/internal/streams"
 )
 
-var WriteBytes func(remoteIP net.IP, remotePort int, payload []byte)
-var ReadBytes func(remoteIP net.IP, remotePort int, payload []byte)
+var WriteBytes func(
+	seq uint64,
+	localIP net.IP,
+	localPort int,
+	remoteIP net.IP,
+	remotePort int,
+	payload []byte)
+var ReadBytes func(
+	seq uint64,
+	localIP net.IP,
+	localPort int,
+	remoteIP net.IP,
+	remotePort int,
+	payload []byte)
 var AddStatementCache func(key string, host string, id []byte)
 
 var (
@@ -237,22 +249,25 @@ func (s *Session) dial(ctx context.Context, host *HostInfo, connConfig *ConnConf
 }
 
 type debugConn struct {
-	ip   net.IP
-	port int
+	seq        atomic.Uint64
+	localIP    net.IP
+	localPort  int
+	remoteIP   net.IP
+	remotePort int
 	net.Conn
 }
 
-func (d debugConn) Write(b []byte) (n int, err error) {
+func (d *debugConn) Write(b []byte) (n int, err error) {
 	if WriteBytes != nil {
-		WriteBytes(d.ip, d.port, b)
+		WriteBytes(d.seq.Add(1), d.localIP, d.localPort, d.remoteIP, d.remotePort, b)
 	}
 	return d.Conn.Write(b)
 }
 
-func (d debugConn) Read(b []byte) (n int, err error) {
+func (d *debugConn) Read(b []byte) (n int, err error) {
 	n, err = d.Conn.Read(b)
 	if n > 0 && ReadBytes != nil {
-		ReadBytes(d.ip, d.port, b[:n])
+		ReadBytes(d.seq.Add(1), d.localIP, d.localPort, d.remoteIP, d.remotePort, b[:n])
 	}
 	return
 }
@@ -273,15 +288,19 @@ func (s *Session) dialWithoutObserver(ctx context.Context, host *HostInfo, cfg *
 
 	ctx, cancel := context.WithCancel(ctx)
 
+	local := dialedHost.Conn.LocalAddr().(*net.TCPAddr)
+
 	debug := debugConn{
-		host.connectAddress,
-		host.port,
-		dialedHost.Conn,
+		localIP:    local.IP,
+		localPort:  local.Port,
+		remoteIP:   host.connectAddress,
+		remotePort: host.port,
+		Conn:       dialedHost.Conn,
 	}
 
 	c := &Conn{
-		conn:          debug,
-		r:             bufio.NewReader(debug),
+		conn:          &debug,
+		r:             bufio.NewReader(&debug),
 		cfg:           cfg,
 		calls:         make(map[int]*callReq),
 		version:       uint8(cfg.ProtoVersion),
@@ -294,7 +313,7 @@ func (s *Session) dialWithoutObserver(ctx context.Context, host *HostInfo, cfg *
 		isSchemaV2:    true, // Try using "system.peers_v2" until proven otherwise
 		frameObserver: s.frameObserver,
 		w: &deadlineContextWriter{
-			w:         debug,
+			w:         &debug,
 			timeout:   writeTimeout,
 			semaphore: make(chan struct{}, 1),
 			quit:      make(chan struct{}),
