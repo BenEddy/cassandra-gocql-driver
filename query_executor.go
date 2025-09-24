@@ -41,6 +41,7 @@ type ExecutableQuery interface {
 	Keyspace() string
 	Table() string
 	IsIdempotent() bool
+	speculativeExecutionStarted() // Used to update speculative execution count
 
 	withContext(context.Context) ExecutableQuery
 
@@ -70,6 +71,8 @@ func (q *queryExecutor) speculate(ctx context.Context, qry ExecutableQuery, sp S
 	for i := 0; i < sp.Attempts(); i++ {
 		select {
 		case <-ticker.C:
+			// Increment speculative count in metrics so it's available to the observer
+			qry.speculativeExecutionStarted()
 			qry.borrowForExecution() // ensure liveness in case of executing Query to prevent races with Query.Release().
 			go q.run(ctx, qry, hostIter, results)
 		case <-ctx.Done():
