@@ -402,6 +402,9 @@ type framer struct {
 	buf []byte
 
 	customPayload map[string][]byte
+
+	bytesTx int // bytes written to the network connection (excluding header)
+	bytesRx int // bytes read from the network connection (excluding header)
 }
 
 func newFramer(compressor Compressor, version byte) *framer {
@@ -523,6 +526,7 @@ func (f *framer) readFrame(r io.Reader, head *frameHeader) error {
 	if err != nil {
 		return fmt.Errorf("unable to read frame body: read %d/%d bytes: %v", n, head.length, err)
 	}
+	f.bytesRx += n
 
 	if head.flags&flagCompress == flagCompress {
 		if f.compres == nil {
@@ -781,6 +785,7 @@ func (f *framer) finish() error {
 
 		f.buf = append(f.buf[:f.headSize], compressed...)
 	}
+	f.bytesTx += len(f.buf)
 	length := len(f.buf) - f.headSize
 	f.setLength(length)
 

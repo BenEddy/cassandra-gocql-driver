@@ -1162,6 +1162,9 @@ func (c *Conn) exec(ctx context.Context, req frameBuilder, tracer Tracer) (*fram
 			return nil, NewErrProtocol("unexpected protocol version in response: got %d expected %d", v, c.version)
 		}
 
+		// Hack to propagate bytesTX from the request framer to the response framer.
+		resp.framer.bytesTx = framer.bytesTx
+
 		return resp.framer, nil
 	case <-timeoutCh:
 		close(call.timeout)
@@ -1619,7 +1622,7 @@ func (c *Conn) executeBatch(ctx context.Context, batch *Batch) *Iter {
 
 	switch x := resp.(type) {
 	case *resultVoidFrame:
-		return &Iter{}
+		return &Iter{framer: framer}
 	case *RequestErrUnprepared:
 		stmt, found := stmts[string(x.StatementId)]
 		if found {

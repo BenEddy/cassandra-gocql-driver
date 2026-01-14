@@ -1128,6 +1128,8 @@ func (q *Query) attempt(ctx context.Context, keyspace string, end, start time.Ti
 			Metrics:   metricsForHost,
 			Err:       iter.err,
 			Attempt:   attempt,
+			BytesTx:   iter.BytesTx(),
+			BytesRx:   iter.BytesRx(),
 		})
 	}
 }
@@ -1655,6 +1657,22 @@ func (iter *Iter) Warnings() []string {
 	return nil
 }
 
+// BytesTx returns the number of bytes written from the network connection.
+func (iter *Iter) BytesTx() int {
+	if iter.framer != nil {
+		return iter.framer.bytesTx
+	}
+	return 0
+}
+
+// BytesRx returns the number of bytes read from the network connection.
+func (iter *Iter) BytesRx() int {
+	if iter.framer != nil {
+		return iter.framer.bytesRx
+	}
+	return 0
+}
+
 // Close closes the iterator and returns any errors that happened during
 // the query or the iteration.
 func (iter *Iter) Close() error {
@@ -1969,7 +1987,11 @@ func (b *Batch) attempt(ctx context.Context, keyspace string, end, start time.Ti
 		Host:    host,
 		Metrics: metricsForHost,
 		Err:     iter.err,
+
 		Attempt: attempt,
+
+		BytesTx: iter.BytesTx(),
+		BytesRx: iter.BytesRx(),
 	})
 }
 
@@ -2204,6 +2226,11 @@ type ObservedQuery struct {
 	// Attempt is the index of attempt at executing this query.
 	// The first attempt is number zero and any retries have non-zero attempt number.
 	Attempt int
+
+	// The number of bytes written to the network connection.
+	BytesTx int
+	// The number of bytes read from the network connection.
+	BytesRx int
 }
 
 // QueryObserver is the interface implemented by query observers / stat collectors.
@@ -2241,6 +2268,11 @@ type ObservedBatch struct {
 	// Attempt is the index of attempt at executing this query.
 	// The first attempt is number zero and any retries have non-zero attempt number.
 	Attempt int
+
+	// The number of bytes written to the network connection.
+	BytesTx int
+	// The number of bytes read from the network connection.
+	BytesRx int
 }
 
 // BatchObserver is the interface implemented by batch observers / stat collectors.
