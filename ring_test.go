@@ -60,3 +60,30 @@ func TestRing_AddHostIfMissing_Existing(t *testing.T) {
 		t.Fatalf("returned host same pointer: %p != %p", h1, host)
 	}
 }
+
+// TestRing_GetHostByIP_StaleMapping verifies getHostByIP never reports a host as found while returning a nil
+// *HostInfo. hostIPToUUID is keyed by nodeToNodeAddress() as computed at insertion time, but HostInfo.update
+// fills in nil address fields, so the key a host would be deleted under can differ from the key it was
+// inserted under. removeHost then drops hosts[hostID] and leaves the original mapping behind.
+func TestRing_GetHostByIP_StaleMapping(t *testing.T) {
+	ring := &ring{}
+
+	// Discovered from system.peers, so only the peer address is known and it is the ip->uuid key.
+	host := &HostInfo{
+		hostId:         MustRandomUUID().String(),
+		connectAddress: net.IPv4(1, 1, 1, 1),
+		peer:           net.IPv4(1, 1, 1, 1),
+	}
+	ring.addHostIfMissing(host)
+
+	// A later read supplies the broadcast address. update fills it because the field is nil, and
+	// nodeToNodeAddress now prefers it over the peer, so the host's key has moved.
+	host.update(&HostInfo{broadcastAddress: net.IPv4(2, 2, 2, 2)})
+
+	ring.removeHost(host.HostID())
+
+	h, ok := ring.getHostByIP("1.1.1.1")
+	if ok && h == nil {
+		t.Fatal("getHostByIP reported a host as found but returned nil")
+	}
+}
