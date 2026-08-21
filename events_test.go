@@ -55,3 +55,28 @@ func TestEventDebounce(t *testing.T) {
 		t.Fatalf("expected to see %d events but got %d", eventCount, eventsSeen)
 	}
 }
+
+// TestSession_HandleNodeDown_StaleMapping verifies handleNodeDown survives an ip->uuid mapping that points at
+// a host no longer in the ring. getHostByIP takes its found flag from hostIPToUUID but its value from hosts,
+// so it can report found with a nil host, and handleNodeDown dereferences it. hostConnPool.fillingStopped
+// reaches this path on every failed pool fill, so a stale mapping crashes the process.
+func TestSession_HandleNodeDown_StaleMapping(t *testing.T) {
+	s := &Session{}
+
+	host := &HostInfo{
+		hostId:         MustRandomUUID().String(),
+		connectAddress: net.IPv4(1, 1, 1, 1),
+		peer:           net.IPv4(1, 1, 1, 1),
+	}
+	s.ring.addHostIfMissing(host)
+	host.update(&HostInfo{broadcastAddress: net.IPv4(2, 2, 2, 2)})
+	s.ring.removeHost(host.HostID())
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("handleNodeDown panicked on a stale ip->uuid mapping: %v", r)
+		}
+	}()
+
+	s.handleNodeDown(net.IPv4(1, 1, 1, 1), 9042)
+}

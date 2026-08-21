@@ -60,11 +60,18 @@ func (r *ring) rrHost() *HostInfo {
 	return r.hostList[pos%len(r.hostList)]
 }
 
+// getHostByIP resolves a host by its node-to-node address. hostIPToUUID and hosts are maintained separately and
+// can disagree, so the found flag comes from the hosts lookup: otherwise a mapping that removeHost left behind
+// hands the caller a nil *HostInfo to dereference.
 func (r *ring) getHostByIP(ip string) (*HostInfo, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	hi, ok := r.hostIPToUUID[ip]
-	return r.hosts[hi], ok
+	hostID, ok := r.hostIPToUUID[ip]
+	if !ok {
+		return nil, false
+	}
+	host, ok := r.hosts[hostID]
+	return host, ok
 }
 
 func (r *ring) getHost(hostID string) *HostInfo {
