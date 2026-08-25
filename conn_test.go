@@ -274,6 +274,63 @@ func TestStartupTimeout(t *testing.T) {
 	cancel()
 }
 
+// TestStartupCancel verifies that a connection setup ended by a cancelled context reports the cancellation
+// as the cause. Session.Close cancels the context every in-flight connect descends from, so without this
+// the abandoned attempts are indistinguishable from connects that genuinely exceeded ConnectTimeout.
+func TestStartupCancel(t *testing.T) {
+	srvCtx, srvCancel := context.WithCancel(context.Background())
+
+	srv := NewTestServer(t, defaultProto, srvCtx)
+	defer srv.Stop()
+
+	cluster := NewCluster(srv.Address)
+	cluster.ProtoVersion = int(defaultProto)
+	cluster.disableControlConn = true
+	// Long enough that the deadline can't plausibly be what ends the dial below.
+	cluster.ConnectTimeout = 30 * time.Second
+	cluster.Timeout = 30 * time.Second
+
+	session, err := cluster.CreateSession()
+	if err != nil {
+		t.Fatalf("CreateSession() failed: %v", err)
+	}
+	defer session.Close()
+
+	// From here the server accepts connections but never answers the Startup frame, so the dial below parks
+	// in setupConn until the context is cancelled out from under it.
+	atomic.StoreInt32(&srv.TimeoutOnStartup, 1)
+
+	addr, err := net.ResolveTCPAddr("tcp", srv.Address)
+	if err != nil {
+		t.Fatal(err)
+	}
+	host := &HostInfo{connectAddress: addr.IP, port: addr.Port}
+	handler := connErrorHandlerFn(func(*Conn, error, bool) {})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	time.AfterFunc(200*time.Millisecond, cancel)
+
+	startTime := time.Now()
+	_, err = session.dial(ctx, host, session.connCfg, handler)
+	elapsed := time.Since(startTime)
+
+	if err == nil {
+		t.Fatal("dial() should have failed once the context was cancelled")
+	}
+	if elapsed >= cluster.ConnectTimeout {
+		t.Fatalf("dial() took %s, so ConnectTimeout ended it rather than the cancellation", elapsed)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("Expected the error to report the cancellation - got '%s'", err)
+	}
+	if strings.Contains(err.Error(), "within timeout") {
+		t.Fatalf("Expected the error not to describe itself as a timeout - got '%s'", err)
+	}
+
+	srvCancel()
+}
+
 func TestTimeout(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
