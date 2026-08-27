@@ -408,7 +408,19 @@ func (s *startupCoordinator) setupConn(ctx context.Context) error {
 			return err
 		}
 	case <-ctx.Done():
-		return errors.New("gocql: no response to connection startup within timeout")
+		// ctx carries the ConnectTimeout deadline installed above, but it also descends from the session
+		// context, which Session.Close cancels. The session context has no deadline of its own, so the two
+		// causes never overlap: a deadline is always ConnectTimeout, a cancel is always the session going
+		// away underneath an in-flight connect. Report them separately, and wrap so callers can also match
+		// on them with errors.Is.
+		switch err := ctx.Err(); {
+		case errors.Is(err, context.Canceled):
+			return fmt.Errorf("gocql: connection startup cancelled: %w", err)
+		case errors.Is(err, context.DeadlineExceeded):
+			return fmt.Errorf("gocql: no response to connection startup within timeout: %w", err)
+		default:
+			return fmt.Errorf("gocql: connection startup failed: %w", err)
+		}
 	}
 
 	return nil
